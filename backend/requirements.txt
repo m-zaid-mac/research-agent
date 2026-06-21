@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+langgraph
+langchain
+langchain-aws
+langchain-community
+tavily-python
+boto3
+python-dotenv
+sse-starlette
