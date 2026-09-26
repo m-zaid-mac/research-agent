@@ -1,51 +1,74 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
+const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:8000";
+
 export default function App() {
   const [topic, setTopic] = useState("");
   const [trace, setTrace] = useState([]);
   const [report, setReport] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const runResearch = async () => {
     if (!topic.trim()) return;
     setLoading(true);
     setTrace([]);
     setReport("");
+    setError("");
 
-    const res = await fetch("http://localhost:8000/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic }),
-    });
+    try {
+      const res = await fetch(`${API_BASE}/research`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic }),
+      });
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let eventName = "message";
 
-      const text = decoder.decode(value);
-      const lines = text.split("\n");
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const line of lines) {
-        if (line.startsWith("event: trace")) continue;
-        if (line.startsWith("event: report")) continue;
-        if (line.startsWith("event: done")) {
-          setLoading(false);
-          break;
-        }
-        if (line.startsWith("data: ")) {
+        // stream:true keeps partial multi-byte characters intact across reads
+        buffer += decoder.decode(value, { stream: true });
+
+        // Only process whole lines. Anything after the last newline stays in
+        // the buffer until the next read completes it.
+        let nl;
+        while ((nl = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, nl).replace(/\r$/, "");
+          buffer = buffer.slice(nl + 1);
+
+          if (line.startsWith(":")) continue; // keep-alive ping
+          if (line.startsWith("event:")) {
+            eventName = line.slice(6).trim();
+            continue;
+          }
+          if (!line.startsWith("data:")) continue;
+
+          let payload;
           try {
-            const data = JSON.parse(line.slice(6));
-            if (data.report) setReport(data.report);
-            else if (data.type) setTrace((prev) => [...prev, data]);
-          } catch (_) {}
+            payload = JSON.parse(line.slice(5).trim());
+          } catch {
+            continue;
+          }
+
+          if (eventName === "trace") setTrace((prev) => [...prev, payload]);
+          else if (eventName === "report") setReport(payload.report);
+          else if (eventName === "error") setError(payload.message);
         }
       }
+    } catch (e) {
+      setError(e.message || "Request failed");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const iconFor = (type) =>
@@ -71,14 +94,17 @@ export default function App() {
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && runResearch()}
+          onKeyDown={(e) => e.key === "Enter" && !loading && runResearch()}
           placeholder="e.g. Impact of AI on software engineering jobs in 2025"
+          disabled={loading}
           style={{
             flex: 1,
             padding: "10px 14px",
             borderRadius: 8,
             border: "1px solid #ddd",
             fontSize: 15,
+            opacity: loading ? 0.6 : 1,
+            cursor: loading ? "not-allowed" : "text",
           }}
         />
         <button
@@ -90,7 +116,7 @@ export default function App() {
             color: "#fff",
             border: "none",
             borderRadius: 8,
-            cursor: "pointer",
+            cursor: loading || !topic.trim() ? "not-allowed" : "pointer",
             fontSize: 15,
             opacity: loading ? 0.7 : 1,
           }}
@@ -98,6 +124,22 @@ export default function App() {
           {loading ? "Researching…" : "Research →"}
         </button>
       </div>
+
+      {error && (
+        <div
+          style={{
+            background: "#fdf0f0",
+            border: "1px solid #f3c9c9",
+            borderRadius: 10,
+            padding: 14,
+            marginBottom: 20,
+            color: "#912626",
+            fontSize: 14,
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       {trace.length > 0 && (
         <div
@@ -113,7 +155,6 @@ export default function App() {
               fontWeight: 600,
               fontSize: 13,
               color: "#888",
-              marginBottom: 10,
               textTransform: "uppercase",
               letterSpacing: 1,
               margin: "0 0 10px",
