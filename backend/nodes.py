@@ -1,6 +1,7 @@
 import asyncio
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from bedrock import get_llm
 from tools import web_search
@@ -32,7 +33,7 @@ ANALYST_PROMPT = (
 )
 
 
-async def _emit(config, type_: str, content: str) -> dict:
+async def _emit(config: RunnableConfig, type_: str, content: str) -> dict:
     """Push one trace event to the client immediately, and return it.
 
     The emit callback is injected per request through LangGraph's config, so
@@ -46,7 +47,7 @@ async def _emit(config, type_: str, content: str) -> dict:
     return event
 
 
-async def decompose_node(state: dict, config: dict) -> dict:
+async def decompose_node(state: dict, config: RunnableConfig) -> dict:
     """Break the topic into 4 focused sub-questions."""
     topic = state["topic"]
     events = [await _emit(config, "decompose", f"Planning research: {topic}")]
@@ -67,7 +68,7 @@ async def decompose_node(state: dict, config: dict) -> dict:
     }
 
 
-async def _search_one(question: str, config: dict) -> tuple[dict, list[dict]]:
+async def _search_one(question: str, config: RunnableConfig) -> tuple[dict, list[dict]]:
     """Search one sub-question. Never raises; a failure becomes a trace event."""
     events = [await _emit(config, "search", f"Searching: {question}")]
     try:
@@ -82,7 +83,7 @@ async def _search_one(question: str, config: dict) -> tuple[dict, list[dict]]:
     return {"question": question, "results": result}, events
 
 
-async def search_node(state: dict, config: dict) -> dict:
+async def search_node(state: dict, config: RunnableConfig) -> dict:
     """Run a web search per sub-question."""
     questions = state["sub_questions"]
 
@@ -104,7 +105,7 @@ async def search_node(state: dict, config: dict) -> dict:
     }
 
 
-async def synthesize_node(state: dict, config: dict) -> dict:
+async def synthesize_node(state: dict, config: RunnableConfig) -> dict:
     """Synthesize all search results into a structured report."""
     events = [await _emit(config, "synthesize", "Writing report")]
 
